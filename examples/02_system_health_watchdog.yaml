@@ -1,0 +1,54 @@
+# FlowForge Example: System Health Watchdog
+# Runs real-time diagnostics on system resources, computes health status,
+# and outputs health metrics to disk.
+
+id: system_health_watchdog
+name: System Health Watchdog
+version: "1.0"
+description: Continuous server health diagnostics and disk watchdog
+
+triggers:
+  - type: cron
+    config:
+      expression: "*/15 * * * *"  # Every 15 minutes
+  - type: manual
+
+steps:
+  - id: check_disk_space
+    name: Inspect Root Disk Usage
+    action: shell
+    with:
+      command: "df -h / | awk 'NR==2 {print $5}' | tr -d '%'"
+
+  - id: check_memory
+    name: Inspect Memory Usage
+    action: shell
+    with:
+      command: "free -m | awk 'NR==2{printf \"%.2f\", $3*100/$2 }'"
+
+  - id: check_uptime
+    name: Inspect System Uptime
+    action: shell
+    with:
+      command: "uptime -p"
+
+  - id: format_metrics
+    name: Compile Diagnostic Report
+    action: transform
+    depends_on: [check_disk_space, check_memory, check_uptime]
+    with:
+      value:
+        timestamp: "{{ now().isoformat() }}"
+        disk_used_percent: "{{ steps.check_disk_space.output.stdout | trim }}"
+        memory_used_percent: "{{ steps.check_memory.output.stdout | trim }}"
+        uptime: "{{ steps.check_uptime.output.stdout | trim }}"
+        status: "healthy"
+
+  - id: persist_health_log
+    name: Append to System Health Log
+    action: file
+    depends_on: [format_metrics]
+    with:
+      operation: append
+      path: "./output/system_health.log"
+      content: "[{{ steps.format_metrics.output.timestamp }}] DISK: {{ steps.format_metrics.output.disk_used_percent }}% | MEM: {{ steps.format_metrics.output.memory_used_percent }}% | {{ steps.format_metrics.output.uptime }}\n"

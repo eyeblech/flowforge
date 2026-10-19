@@ -1,0 +1,44 @@
+# FlowForge Example: Webhook-Triggered Alert Pipeline
+# Ingests webhook events from external services (e.g. GitHub, Stripe, Datadog),
+# extracts event payload data, and dispatches formatted alerts.
+
+id: webhook_pipeline
+name: Webhook Event Ingestion Pipeline
+version: "1.0"
+description: Listens for incoming webhook payloads and routes notifications
+
+triggers:
+  - type: webhook
+    config:
+      path: "/api/v1/webhooks/webhook_pipeline"
+      secret_token: "secret123"
+
+steps:
+  - id: parse_webhook_payload
+    name: Parse Incoming Webhook
+    action: transform
+    with:
+      value:
+        event_source: "github"
+        sender: "{{ trigger.payload.body.sender.login | default('github-bot') }}"
+        action: "{{ trigger.payload.body.action | default('ping') }}"
+        repo: "{{ trigger.payload.body.repository.full_name | default('my-org/my-repo') }}"
+        received_at: "{{ now().isoformat() }}"
+
+  - id: format_notification
+    name: Format Alert Message
+    action: transform
+    depends_on: [parse_webhook_payload]
+    with:
+      value:
+        title: "Webhook Event: {{ steps.parse_webhook_payload.output.action }}"
+        summary: "Received {{ steps.parse_webhook_payload.output.action }} from {{ steps.parse_webhook_payload.output.sender }} on {{ steps.parse_webhook_payload.output.repo }}"
+
+  - id: save_audit_log
+    name: Save Webhook Audit Log
+    action: file
+    depends_on: [format_notification]
+    with:
+      operation: append
+      path: "./output/webhook_audit.log"
+      content: "[{{ now().isoformat() }}] {{ steps.format_notification.output.summary }}\n"

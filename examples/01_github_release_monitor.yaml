@@ -1,0 +1,69 @@
+# FlowForge Example: GitHub Release Monitor & Reporter
+# Polls the GitHub API for releases of a target repository, parses the response,
+# and generates a local markdown summary report.
+
+id: github_release_monitor
+name: GitHub Release Monitor
+version: "1.0"
+description: Automatically monitor and archive latest repository releases
+
+env:
+  TARGET_REPO: "pallets/flask"
+
+triggers:
+  - type: cron
+    config:
+      expression: "0 */6 * * *"  # Every 6 hours
+  - type: manual
+
+steps:
+  - id: fetch_latest_release
+    name: Fetch Latest GitHub Release
+    action: http
+    retry:
+      max_attempts: 3
+      initial_delay: 2.0
+      backoff_multiplier: 2.0
+    with:
+      url: "https://api.github.com/repos/{{ env.TARGET_REPO }}/releases/latest"
+      headers:
+        User-Agent: "FlowForge-Release-Monitor"
+        Accept: "application/vnd.github.v3+json"
+      expected_status: [200]
+
+  - id: extract_release_data
+    name: Extract Release Metadata
+    action: transform
+    depends_on: [fetch_latest_release]
+    with:
+      value:
+        repo: "{{ env.TARGET_REPO }}"
+        tag: "{{ steps.fetch_latest_release.output.json.tag_name }}"
+        name: "{{ steps.fetch_latest_release.output.json.name }}"
+        published_at: "{{ steps.fetch_latest_release.output.json.published_at }}"
+        url: "{{ steps.fetch_latest_release.output.json.html_url }}"
+        author: "{{ steps.fetch_latest_release.output.json.author.login }}"
+        body: "{{ steps.fetch_latest_release.output.json.body }}"
+
+  - id: write_release_report
+    name: Write Markdown Release Document
+    action: file
+    depends_on: [extract_release_data]
+    with:
+      operation: write
+      path: "./output/releases/{{ steps.extract_release_data.output.tag }}.md"
+      content: |
+        # Release Report: {{ steps.extract_release_data.output.repo }}
+        
+        - **Version Tag:** `{{ steps.extract_release_data.output.tag }}`
+        - **Release Name:** {{ steps.extract_release_data.output.name }}
+        - **Published Date:** {{ steps.extract_release_data.output.published_at }}
+        - **Release By:** @{{ steps.extract_release_data.output.author }}
+        - **Release URL:** {{ steps.extract_release_data.output.url }}
+        
+        ## Release Notes
+        
+        {{ steps.extract_release_data.output.body }}
+        
+        ---
+        *Generated automatically by FlowForge at {{ now().isoformat() }}*

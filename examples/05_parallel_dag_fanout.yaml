@@ -1,0 +1,60 @@
+# FlowForge Example: Parallel DAG Fan-Out & Fan-In
+# Demonstrates asynchronous parallel execution across multiple workers
+# with an aggregation step that waits for all parallel branches to finish.
+
+id: parallel_dag_fanout
+name: Parallel DAG Fan-Out & Aggregation
+version: "1.0"
+description: Multi-worker parallel processing pipeline with barrier synchronization
+
+steps:
+  - id: init_pipeline
+    name: Initialize Pipeline
+    action: transform
+    with:
+      value:
+        job_id: "JOB-{{ now().strftime('%Y%m%d%H%M%S') }}"
+        started_at: "{{ now().isoformat() }}"
+
+  - id: worker_shard_alpha
+    name: Process Shard Alpha (US-East)
+    action: shell
+    depends_on: [init_pipeline]
+    with:
+      command: "sleep 0.2 && echo '{\"shard\": \"alpha\", \"region\": \"us-east\", \"items_processed\": 1420, \"status\": \"ok\"}'"
+
+  - id: worker_shard_beta
+    name: Process Shard Beta (EU-West)
+    action: shell
+    depends_on: [init_pipeline]
+    with:
+      command: "sleep 0.2 && echo '{\"shard\": \"beta\", \"region\": \"eu-west\", \"items_processed\": 980, \"status\": \"ok\"}'"
+
+  - id: worker_shard_gamma
+    name: Process Shard Gamma (AP-South)
+    action: shell
+    depends_on: [init_pipeline]
+    with:
+      command: "sleep 0.2 && echo '{\"shard\": \"gamma\", \"region\": \"ap-south\", \"items_processed\": 2150, \"status\": \"ok\"}'"
+
+  - id: aggregate_shards
+    name: Aggregate Parallel Workers
+    action: transform
+    depends_on: [worker_shard_alpha, worker_shard_beta, worker_shard_gamma]
+    with:
+      value:
+        job_id: "{{ steps.init_pipeline.output.job_id }}"
+        workers:
+          - "{{ steps.worker_shard_alpha.output.stdout }}"
+          - "{{ steps.worker_shard_beta.output.stdout }}"
+          - "{{ steps.worker_shard_gamma.output.stdout }}"
+        completed_at: "{{ now().isoformat() }}"
+
+  - id: output_batch_summary
+    name: Save Batch Results
+    action: file
+    depends_on: [aggregate_shards]
+    with:
+      operation: write
+      path: "./output/parallel_batch_summary.json"
+      content: "{{ steps.aggregate_shards.output | to_json }}"

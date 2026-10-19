@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.10", "3.11", "3.12"]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .[dev]
+
+      - name: Run pytest test suite
+        run: |
+          pytest -v --cov=flowforge tests/
+
+      - name: Validate example workflows
+        run: |
+          flowforge validate examples/01_github_release_monitor.yaml
+          flowforge validate examples/02_system_health_watchdog.yaml
+          flowforge validate examples/03_api_data_etl.yaml
+          flowforge validate examples/04_ai_incident_summarizer.yaml
+          flowforge validate examples/05_parallel_dag_fanout.yaml
+          flowforge validate examples/06_webhook_pipeline.yaml
+
+      - name: Execute end-to-end sample pipelines
+        run: |
+          flowforge run examples/02_system_health_watchdog.yaml
+          flowforge run examples/05_parallel_dag_fanout.yaml

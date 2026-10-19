@@ -1,0 +1,68 @@
+# FlowForge Example: AI Incident Summarizer & Triage
+# Receives an error report, simulates diagnosis or LLM root-cause synthesis,
+# formats remediation steps, and generates an incident ticket report.
+
+id: ai_incident_summarizer
+name: AI Incident Summarizer & Triage
+version: "1.0"
+description: Automated triage and remediation summary for server incidents
+
+steps:
+  - id: ingest_incident_log
+    name: Load Incident Payload
+    action: transform
+    with:
+      value:
+        service: "payment-gateway-service"
+        environment: "production"
+        error_code: "ECONNREFUSED_503"
+        timestamp: "{{ now().isoformat() }}"
+        raw_trace: "Connection to upstream Redis cluster failed after 3000ms: Connection refused on port 6379"
+
+  - id: diagnose_incident
+    name: Run Automated Heuristic Diagnosis
+    action: shell
+    depends_on: [ingest_incident_log]
+    with:
+      command: |
+        python3 -c "
+        import json
+        trace = '''{{ steps.ingest_incident_log.output.raw_trace }}'''
+        if 'Redis' in trace or '6379' in trace:
+            analysis = {
+                'component': 'Redis Cache Layer',
+                'severity': 'HIGH',
+                'probable_cause': 'Redis replica failover or network partition in cluster',
+                'recommended_actions': [
+                    'Check Redis sentinel quorum status',
+                    'Verify security group egress rules on port 6379',
+                    'Restart degraded payment cache pool'
+                ]
+            }
+        else:
+            analysis = {'component': 'General', 'severity': 'MEDIUM', 'probable_cause': 'Unknown', 'recommended_actions': ['Escalate to on-call']}
+        print(json.dumps(analysis))
+        "
+
+  - id: generate_incident_report
+    name: Generate Markdown Incident Ticket
+    action: file
+    depends_on: [diagnose_incident]
+    with:
+      operation: write
+      path: "./output/incidents/INC-{{ now().strftime('%Y%m%d%H%M%S') }}.md"
+      content: |
+        # Incident Triage Report: {{ steps.ingest_incident_log.output.service }}
+        
+        - **Service:** `{{ steps.ingest_incident_log.output.service }}`
+        - **Environment:** `{{ steps.ingest_incident_log.output.environment }}`
+        - **Error Code:** `{{ steps.ingest_incident_log.output.error_code }}`
+        - **Detected At:** {{ steps.ingest_incident_log.output.timestamp }}
+        - **Raw Trace:** `{{ steps.ingest_incident_log.output.raw_trace }}`
+        
+        ## Automated Diagnosis
+        
+        {{ steps.diagnose_incident.output.stdout }}
+        
+        ---
+        *Triaged automatically by FlowForge Orchestrator*

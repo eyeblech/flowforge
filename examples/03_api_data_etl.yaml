@@ -1,0 +1,70 @@
+# FlowForge Example: API Data ETL Pipeline
+# Fetches data from a JSON REST API, transforms the payload,
+# creates a local SQLite table, and stores records via SQL action.
+
+id: api_data_etl
+name: API Data ETL Pipeline
+version: "1.0"
+description: Extract REST API data, transform fields, and load into SQLite database
+
+steps:
+  - id: init_database_table
+    name: Initialize SQLite Analytics Table
+    action: sql
+    with:
+      database: "analytics.db"
+      query: |
+        CREATE TABLE IF NOT EXISTS public_apis (
+            name TEXT PRIMARY KEY,
+            description TEXT,
+            category TEXT,
+            status TEXT,
+            synced_at TIMESTAMP
+        );
+      fetch: false
+
+  - id: fetch_external_data
+    name: Fetch Sample API Data
+    action: http
+    depends_on: [init_database_table]
+    with:
+      url: "https://httpbin.org/json"
+      expected_status: [200]
+
+  - id: transform_record
+    name: Transform API Payload
+    action: transform
+    depends_on: [fetch_external_data]
+    with:
+      value:
+        name: "{{ steps.fetch_external_data.output.json.slideshow.title }}"
+        author: "{{ steps.fetch_external_data.output.json.slideshow.author }}"
+        date: "{{ steps.fetch_external_data.output.json.slideshow.date }}"
+        slides_count: "{{ steps.fetch_external_data.output.json.slideshow.slides | length }}"
+        synced_at: "{{ now().isoformat() }}"
+
+  - id: insert_record
+    name: Load Record into SQLite
+    action: sql
+    depends_on: [transform_record]
+    with:
+      database: "analytics.db"
+      query: |
+        INSERT OR REPLACE INTO public_apis (name, description, category, status, synced_at)
+        VALUES (?, ?, ?, ?, ?);
+      params:
+        - "{{ steps.transform_record.output.name }}"
+        - "Authored by {{ steps.transform_record.output.author }}"
+        - "Presentations"
+        - "active"
+        - "{{ steps.transform_record.output.synced_at }}"
+      fetch: false
+
+  - id: verify_db_records
+    name: Verify Records in SQLite
+    action: sql
+    depends_on: [insert_record]
+    with:
+      database: "analytics.db"
+      query: "SELECT * FROM public_apis;"
+      fetch: true
