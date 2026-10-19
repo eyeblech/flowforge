@@ -8,7 +8,7 @@ FlowForge is a lightweight, resilient, developer-first workflow automation and t
 
 ### From Source
 ```bash
-git clone https://github.com/your-username/flowforge.git
+git clone https://github.com/eyeblech/flowforge.git
 cd flowforge
 python3 -m venv .venv
 source .venv/bin/activate

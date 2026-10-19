@@ -10,8 +10,9 @@ readme = "README.md"
 requires-python = ">=3.10"
 license = {text = "MIT"}
 authors = [
-    {name = "FlowForge Team", email = "hello@flowforge.dev"}
+    {name = "eyeblech", email = "0x1123@proton.me"}
 ]
+urls = {Homepage = "https://github.com/eyeblech/flowforge", Repository = "https://github.com/eyeblech/flowforge", Issues = "https://github.com/eyeblech/flowforge/issues"}
 keywords = [
     "workflow", "automation", "orchestration", "dag", "asyncio",
     "scheduler", "cron", "webhook", "pipeline", "tasks", "etl"

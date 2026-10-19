@@ -8,50 +8,405 @@
 
 # FlowForge ⚡
 
-### A lightweight, resilient, developer-first workflow automation and task orchestration engine for Python.
+### The Developer-First, Zero-Infrastructure Workflow Automation & Task Orchestration Engine for Python.
 
-[![CI](https://github.com/your-username/flowforge/actions/workflows/ci.yml/badge.svg)](https://github.com/your-username/flowforge/actions)
-[![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-blue.svg)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-emerald.svg)](LICENSE)
+[![CI](https://github.com/eyeblech/flowforge/actions/workflows/ci.yml/badge.svg)](https://github.com/eyeblech/flowforge/actions)
+[![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-10b981.svg)](LICENSE)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
-[![Architecture: AsyncIO](https://img.shields.io/badge/engine-asyncio-purple.svg)](https://docs.python.org/3/library/asyncio.html)
+[![Architecture: AsyncIO](https://img.shields.io/badge/engine-asyncio-8b5cf6.svg)](https://docs.python.org/3/library/asyncio.html)
+[![Storage: SQLite WAL](https://img.shields.io/badge/storage-SQLite%20WAL-003B57.svg?logo=sqlite&logoColor=white)](https://www.sqlite.org/wal.html)
+[![GitHub stars](https://img.shields.io/github/stars/eyeblech/flowforge?style=social)](https://github.com/eyeblech/flowforge/stargazers)
 
-[Features](#-key-features) • [Quickstart](#-quickstart) • [Architecture](#-architecture) • [Example Workflows](#-ready-to-run-examples) • [Web Studio](#-web-studio--api) • [CLI Reference](#-cli-commands) • [Docs](docs/)
+<p align="center">
+  <a href="#-what-is-flowforge">What is FlowForge?</a> •
+  <a href="#-real-world-use-cases">Use Cases</a> •
+  <a href="#-how-to-run">How to Run</a> •
+  <a href="#-workflow-anatomy">Workflow Syntax</a> •
+  <a href="#-web-studio--api">Web Dashboard</a> •
+  <a href="#-comparison">Comparison</a> •
+  <a href="#-architecture">Architecture</a>
+</p>
 
 </div>
 
 ---
 
-## 💡 Why FlowForge?
+## 🎯 What is FlowForge?
 
-Modern orchestration tools like Airflow or Temporal are powerful, but they often require massive distributed infrastructure, JVM dependencies, Redis/Kafka brokers, and complex Kubernetes setups just to run simple, reliable automation pipelines.
+**FlowForge** is a modern, lightweight, async-native task orchestration and workflow automation engine. It allows developers to define multi-step Directed Acyclic Graph (DAG) pipelines in declarative YAML or Python, executing them with parallel task scheduling, automatic exponential-backoff retries, and microsecond SQLite state checkpointing.
 
-**FlowForge** fills the gap: it delivers the **power of a DAG-based orchestration engine** with the **simplicity of a single Python package**.
+### The Problem It Solves
+Traditional workflow engines like **Apache Airflow** or **Temporal** are powerful, but they bring massive overhead:
+- They require heavyweight distributed brokers (Redis, Kafka, RabbitMQ).
+- They demand separate worker fleets, PostgreSQL clusters, and complex Kubernetes setups.
+- Running a simple recurring server health watchdog or API ETL pipeline requires hundreds of megabytes of RAM and complex configuration.
 
-- **Zero Heavyweight Infrastructure**: No Redis, RabbitMQ, or Celery workers required. Runs locally or in a single tiny container.
-- **Async-Native DAG Execution**: Uses Kahn's algorithm for topological sorting and cycle detection, executing independent pipeline branches concurrently via Python `asyncio`.
-- **Fault-Tolerant by Default**: Exponential backoff retries with jitter, per-step timeouts, and failure boundary isolation (`continue_on_error`).
-- **SQLite WAL Checkpointing**: Complete execution history, step status, inputs, and outputs are persisted to SQLite with WAL mode for microsecond overhead.
-- **Batteries-Included Actions**: Out-of-the-box support for REST APIs (`http`), bash scripts (`shell`), file I/O (`file`), SQL databases (`sql`), Slack/Discord webhooks (`notify`), and AI nodes (`llm`).
-- **Multi-Interface**: Beautiful **Rich terminal CLI**, interactive **Dark Mode Web Dashboard**, and programmatic Python API.
-
----
-
-## ⚡ Key Features
-
-| Capability | Description |
-|---|---|
-| **DAG Scheduling** | Multi-branch fan-out and fan-in dependency resolution with cycle prevention. |
-| **Expression Engine** | Safe Jinja2 templating with dot notation (`{{ steps.fetch.output.json.data }}`). |
-| **Resilient Retries** | Configurable exponential backoff, jitter, and timeout per task. |
-| **Trigger Ecosystem** | Cron scheduler, HTTP webhooks with HMAC verification, directory file watcher. |
-| **Extensible Actions** | Easily register custom Python task actions with `@register_action`. |
-| **Telemetry & Observability** | Real-time event bus, execution duration metrics, and audit logging. |
-| **Web Dashboard** | Embedded FastAPI web dashboard with run inspector and manual execution trigger. |
+### The FlowForge Solution
+FlowForge brings the power of enterprise DAG scheduling into a **single, zero-infrastructure Python engine**:
+- **Zero External Dependencies**: No Redis, RabbitMQ, or Celery required. Runs locally or in a single lightweight container.
+- **Asyncio DAG Execution**: Computes topological sorting via Kahn's algorithm, detecting cycles and executing non-dependent steps concurrently.
+- **Built-in Resilience**: Exponential backoff with randomized jitter, per-step execution timeouts, and conditional failure boundaries (`continue_on_error`).
+- **SQLite WAL Checkpointing**: Every workflow run, step state, duration metric, and log entry is persisted instantly with zero external database configuration.
+- **Dual Interface**: A rich terminal CLI with colored live progress trees **plus** an embedded Dark Mode Web Studio on `http://localhost:8000`.
 
 ---
 
-## 🏗 Architecture
+## 💼 Real-World Use Cases
+
+FlowForge is engineered for developers, sysadmins, and data engineers who need reliable automation without distributed cluster complexity.
+
+### 1. 🛠 Autonomous DevOps & System Watchdogs
+> *Continuously monitor server resources, evaluate thresholds, and trigger automated self-healing scripts or alerts.*
+
+```mermaid
+flowchart LR
+    A[Cron Trigger: Every 15m] --> B[Check Disk Space]
+    A --> C[Check Memory & CPU]
+    A --> D[Check Docker Containers]
+    B --> E[Compile Diagnostic Report]
+    C --> E
+    D --> E
+    E --> F{Threshold Breached?}
+    F -- Yes --> G[Dispatch Discord/Slack Alert]
+    F -- No --> H[Append to Health Log]
+```
+- **Example File**: [`examples/02_system_health_watchdog.yaml`](examples/02_system_health_watchdog.yaml)
+- **Actions Used**: `shell`, `transform`, `file`, `notify`
+
+---
+
+### 2. 📊 Lightweight Data Engineering & API ETL
+> *Extract records from REST endpoints, normalize nested JSON structures, and load directly into SQLite, Postgres, or Parquet.*
+
+```mermaid
+flowchart LR
+    A[Schedule / Webhook] --> B[Initialize Database Table]
+    B --> C[HTTP GET: REST API]
+    C --> D[Transform & Clean Schema]
+    D --> E[SQL INSERT / REPLACE]
+    E --> F[Verify Integrity & Log Rows]
+```
+- **Example File**: [`examples/03_api_data_etl.yaml`](examples/03_api_data_etl.yaml)
+- **Actions Used**: `http`, `sql`, `transform`
+
+---
+
+### 3. 🤖 AI-Powered Incident Triage & Diagnostics
+> *Ingest production crash reports, use local LLMs (Ollama) or OpenAI to analyze tracebacks, extract root causes, and draft remediation tickets.*
+
+```mermaid
+flowchart LR
+    A[Incoming Webhook Crash Alert] --> B[Ingest Error Trace]
+    B --> C[AI / LLM Analysis: Root Cause Synthesis]
+    C --> D[Generate Incident Markdown Ticket]
+    D --> E[Post Triage Report to Incident Channel]
+```
+- **Example File**: [`examples/04_ai_incident_summarizer.yaml`](examples/04_ai_incident_summarizer.yaml)
+- **Actions Used**: `llm`, `shell`, `transform`, `file`
+
+---
+
+### 4. ⚡ High-Throughput Parallel Batch Processing (Fan-Out / Fan-In)
+> *Split large batch jobs across multiple concurrent shard workers, executing them in parallel and aggregating outputs at a barrier step.*
+
+```mermaid
+flowchart TD
+    Init[Initialize Pipeline & Batch ID] --> W1[Worker Shard Alpha: US-East]
+    Init --> W2[Worker Shard Beta: EU-West]
+    Init --> W3[Worker Shard Gamma: AP-South]
+    W1 --> Agg[Barrier Step: Aggregate Shard Outputs]
+    W2 --> Agg
+    W3 --> Agg
+    Agg --> Save[Write Consolidated Batch Result]
+```
+- **Example File**: [`examples/05_parallel_dag_fanout.yaml`](examples/05_parallel_dag_fanout.yaml)
+- **Execution Speed**: 3 parallel branches take **~220ms total** instead of running sequentially.
+
+---
+
+### 5. 🔔 Webhook Event Ingestion & Notification Router
+> *Listen for incoming webhooks (GitHub pushes, Stripe payments, Datadog alerts), authenticate tokens, and route formatted alerts.*
+
+- **Example File**: [`examples/06_webhook_pipeline.yaml`](examples/06_webhook_pipeline.yaml)
+- **Actions Used**: `transform`, `file`, `notify`
+
+---
+
+## ⚡ Feature Comparison Matrix
+
+| Feature | **FlowForge** | **Apache Airflow** | **Temporal** | **Celery** |
+|---|---|---|---|---|
+| **Primary Focus** | Developer-first automation | Big Data / Enterprise ETL | Long-running state machines | Task queue worker pool |
+| **External Broker Required** | ❌ **None** (Self-contained) | ✅ Redis / RabbitMQ | ✅ Custom cluster / DB | ✅ Redis / RabbitMQ |
+| **Storage Engine** | ⚡ **Embedded SQLite WAL** | PostgreSQL / MySQL | PostgreSQL / Cassandra | Result Backend |
+| **Language** | Modern Python 3.10+ | Python | Go / Java / Python / TS | Python |
+| **Execution Model** | AsyncIO Parallel DAG | Multi-process Celery/K8s | Distributed Activity Workers | Worker processes |
+| **Resource Footprint** | **~25 MB RAM** | ~1-2 GB+ RAM | ~500 MB+ RAM | ~100 MB+ RAM |
+| **Web Dashboard** | Built-in Dark Mode UI | Heavyweight Webserver | Web UI service | Flower (separate) |
+| **Startup Time** | **< 1 second** | Minutes | Minutes | Seconds |
+
+---
+
+## 🚀 How to Run
+
+You can run FlowForge in 4 flexible ways depending on your environment.
+
+### 1. Installation
+
+```bash
+# Clone the repository
+git clone https://github.com/eyeblech/flowforge.git
+cd flowforge
+
+# Setup virtual environment
+python3 -m venv .venv
+source .venv/bin/activate
+
+# Install in editable mode
+pip install -e .
+```
+
+---
+
+### 2. Execution Modes
+
+#### Option A: Terminal CLI (Fastest & Simplest)
+
+Execute any workflow YAML directly with real-time colored step telemetry:
+
+```bash
+# Run the parallel fan-out workflow
+flowforge run examples/05_parallel_dag_fanout.yaml
+
+# Pass custom trigger parameters from the command line
+flowforge run examples/01_github_release_monitor.yaml --param TARGET_REPO=pallets/flask
+
+# Validate workflow DAG syntax and detect circular dependencies
+flowforge validate examples/02_system_health_watchdog.yaml
+
+# Render terminal dependency tree
+flowforge tree examples/05_parallel_dag_fanout.yaml
+
+# View recent runs stored in SQLite
+flowforge runs list
+
+# Inspect detailed step outputs and logs of a run
+flowforge runs get <run_id>
+```
+
+**Terminal Run Preview:**
+```
+╭──────────────────────────────────────────────────────────────────────────────╮
+│  ╔═╗┬  ┌─┐┬ ┬╔═╗┌─┐┬─┐┌─┐┌─┐                                                 │
+│  ╠╣ │  │ ││││╠╣ │ │├┬┘│ ┬├┤                                                  │
+│  ╚  ┴─┘└─┘└┴┘╚  └─┘┴└─└─┘└─┘                                                 │
+│  Developer-first async workflow automation engine                            │
+╰──────────────────────────────────────────────────────────────────────────────╯
+Loaded workflow: Parallel DAG Fan-Out & Aggregation (6 steps)
+Starting execution pipeline...
+  ▶ Running step: init_pipeline
+  ✔ Completed step: init_pipeline
+  ▶ Running step: worker_shard_beta
+  ▶ Running step: worker_shard_alpha
+  ▶ Running step: worker_shard_gamma
+  ✔ Completed step: worker_shard_beta
+  ✔ Completed step: worker_shard_alpha
+  ✔ Completed step: worker_shard_gamma
+  ▶ Running step: aggregate_shards
+  ✔ Completed step: aggregate_shards
+  ▶ Running step: output_batch_summary
+  ✔ Completed step: output_batch_summary
+
+Execution Summary: Parallel DAG Fan-Out & Aggregation (run_ac2f4d07eeab)        
+┏━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━┓
+┃ Step ID         ┃ Action    ┃  Status   ┃ Attempt ┃ Duration ┃ Error / Notes ┃
+┡━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━┩
+│ init_pipeline   │ transform │ ● SUCCESS │    1    │    4.1ms │               │
+│ worker_shard_b… │ shell     │ ● SUCCESS │    1    │  204.6ms │               │
+│ worker_shard_a… │ shell     │ ● SUCCESS │    1    │  204.1ms │               │
+│ worker_shard_g… │ shell     │ ● SUCCESS │    1    │  204.0ms │               │
+│ aggregate_shar… │ transform │ ● SUCCESS │    1    │    4.7ms │               │
+│ output_batch_s… │ file      │ ● SUCCESS │    1    │    2.2ms │               │
+└─────────────────┴───────────┴───────────┴─────────┴──────────┴───────────────┘
+
+╭─ Run Result ─────────────────────────────────────────────────────────────────╮
+│ Status: ● SUCCESS  │  Total Duration: 223.80ms  │  Trigger: cli              │
+╰──────────────────────────────────────────────────────────────────────────────╯
+```
+
+---
+
+#### Option B: Embedded Web Dashboard & Webhook Server
+
+Launch the self-hosted FlowForge Studio, REST API, and Trigger Server:
+
+```bash
+flowforge serve --workflows-dir ./examples --port 8000
+```
+
+1. Open your browser to **`http://localhost:8000`**.
+2. View registered workflows, trigger runs with custom JSON payloads, and inspect step outputs.
+3. Post incoming webhooks directly:
+```bash
+curl -X POST http://localhost:8000/api/v1/webhooks/webhook_pipeline \
+  -H "Content-Type: application/json" \
+  -H "X-FlowForge-Token: secret123" \
+  -d '{"action": "deploy_completed", "sender": {"login": "octocat"}}'
+```
+
+---
+
+#### Option C: 1-Click Docker Compose
+
+Deploy a containerized FlowForge instance with persistent volumes:
+
+```bash
+docker compose up -d
+```
+Access the studio at `http://localhost:8000`.
+
+---
+
+#### Option D: Programmatic Python SDK
+
+Use FlowForge directly inside your Python applications:
+
+```python
+import asyncio
+from flowforge import WorkflowEngine, parse_workflow_str
+
+workflow_yaml = """
+id: programmatic_pipeline
+name: Programmatic Pipeline
+steps:
+  - id: step_one
+    action: transform
+    with:
+      value:
+        greeting: "Hello from Python SDK!"
+"""
+
+async def main():
+    engine = WorkflowEngine()
+    workflow = parse_workflow_str(workflow_yaml)
+    run = await engine.execute(workflow)
+    print(f"Run completed with status: {run.status}")
+    print(f"Output: {run.step_runs['step_one'].output_data}")
+
+asyncio.run(main())
+```
+
+---
+
+## 📖 Workflow Anatomy (YAML Specification)
+
+Every workflow is defined in clear, human-readable YAML:
+
+```yaml
+# Unique workflow identifier and metadata
+id: release_alert_pipeline
+name: GitHub Release Alert Pipeline
+version: "1.0"
+description: Fetches latest releases and sends alerts
+
+# Workflow-level environment variables
+env:
+  TARGET_REPO: "pallets/flask"
+
+# Automated triggers (Cron, Webhook, FileWatch, Manual)
+triggers:
+  - type: cron
+    config:
+      expression: "0 */6 * * *"  # Runs every 6 hours
+  - type: webhook
+    config:
+      secret_token: "secret123"
+
+# Concurrency limits and global timeout
+concurrency: 5
+timeout: 300.0
+
+# DAG Step definitions
+steps:
+  # Step 1: Make HTTP REST request with automatic retries
+  - id: fetch_latest_release
+    name: Fetch Latest Release
+    action: http
+    retry:
+      max_attempts: 3
+      initial_delay: 2.0
+      backoff_multiplier: 2.0
+      jitter: true
+    with:
+      url: "https://api.github.com/repos/{{ env.TARGET_REPO }}/releases/latest"
+      expected_status: [200]
+
+  # Step 2: Transform and extract specific JSON fields
+  - id: extract_metadata
+    name: Extract Release Metadata
+    action: transform
+    depends_on: [fetch_latest_release]
+    with:
+      value:
+        tag: "{{ steps.fetch_latest_release.output.json.tag_name }}"
+        author: "{{ steps.fetch_latest_release.output.json.author.login }}"
+
+  # Step 3: Conditional execution (only runs if condition is True)
+  - id: write_release_file
+    name: Save Release Markdown
+    action: file
+    depends_on: [extract_metadata]
+    when: "{{ steps.extract_metadata.output.tag != '' }}"
+    with:
+      operation: write
+      path: "./output/releases/{{ steps.extract_metadata.output.tag }}.md"
+      content: |
+        # Release: {{ steps.extract_metadata.output.tag }}
+        Author: @{{ steps.extract_metadata.output.author }}
+```
+
+---
+
+## 🔌 Built-in Action Ecosystem
+
+FlowForge includes rich built-in actions covering infrastructure, data, and AI:
+
+| Action | Identifier | Description | Key Inputs |
+|---|---|---|---|
+| **HTTP Client** | `http` | Asynchronous REST API requests | `url`, `method`, `headers`, `json`, `expected_status` |
+| **Shell Command** | `shell` | Async bash/terminal script execution | `command`, `cwd`, `env`, `fail_on_error`, `timeout` |
+| **Data Transform** | `transform` | Dynamic JSON projection & list slicing | `value`, `items`, `limit`, `mapping` |
+| **File System** | `file` | Read, write, append, delete, check files | `operation`, `path`, `content`, `encoding` |
+| **SQL Database** | `sql` | Execute SQLite queries and fetch rows | `query`, `database`, `params`, `fetch` |
+| **Notifications** | `notify` | Dispatch Slack/Discord webhook cards | `webhook_url`, `channel`, `title`, `message`, `level` |
+| **AI / LLM Node** | `llm` | AI decision and extraction via OpenAI/Ollama | `prompt`, `model`, `system`, `temperature`, `json_mode` |
+| **Delay / Sleep** | `delay` | Timed pauses and rate limiting | `seconds` |
+
+### Creating Custom Actions
+
+Writing custom actions requires just a single Python class:
+
+```python
+from flowforge.actions.base import BaseAction, ActionResult, ActionContext, register_action
+from typing import Dict, Any
+
+@register_action("send_sms")
+class SendSmsAction(BaseAction):
+    name = "send_sms"
+
+    async def execute(self, params: Dict[str, Any], context: ActionContext) -> ActionResult:
+        recipient = params.get("to")
+        message = params.get("message")
+        # Call your SMS provider API here...
+        return ActionResult(success=True, output={"delivered": True, "to": recipient})
+```
+
+---
+
+## 🏗 Architecture & Internal Design
+
+FlowForge separates concerns into clean, decoupled layers:
 
 ```
                     ┌────────────────────────────┐
@@ -101,210 +456,61 @@ Modern orchestration tools like Airflow or Temporal are powerful, but they often
     └──────────────────────────┘     └───────────────────────────┘
 ```
 
----
-
-## 🚀 Quickstart
-
-### 1. Installation
-
-```bash
-# Clone the repository
-git clone https://github.com/your-username/flowforge.git
-cd flowforge
-
-# Setup virtual environment
-python3 -m venv .venv
-source .venv/bin/activate
-
-# Install FlowForge
-pip install -e .
-```
-
-### 2. Run an Example Pipeline
-
-FlowForge includes pre-built production workflows in [`examples/`](examples/):
-
-```bash
-# Run the parallel DAG fan-out pipeline
-flowforge run examples/05_parallel_dag_fanout.yaml
-```
-
-**Terminal Output:**
-```
-╭──────────────────────────────────────────────────────────────────────────────╮
-│  ╔═╗┬  ┌─┐┬ ┬╔═╗┌─┐┬─┐┌─┐┌─┐                                                 │
-│  ╠╣ │  │ ││││╠╣ │ │├┬┘│ ┬├┤                                                  │
-│  ╚  ┴─┘└─┘└┴┘╚  └─┘┴└─└─┘└─┘                                                 │
-│  Developer-first async workflow automation engine                            │
-╰──────────────────────────────────────────────────────────────────────────────╯
-Loaded workflow: Parallel DAG Fan-Out & Aggregation (6 steps)
-Starting execution pipeline...
-  ▶ Running step: init_pipeline
-  ✔ Completed step: init_pipeline
-  ▶ Running step: worker_shard_beta
-  ▶ Running step: worker_shard_alpha
-  ▶ Running step: worker_shard_gamma
-  ✔ Completed step: worker_shard_beta
-  ✔ Completed step: worker_shard_alpha
-  ✔ Completed step: worker_shard_gamma
-  ▶ Running step: aggregate_shards
-  ✔ Completed step: aggregate_shards
-  ▶ Running step: output_batch_summary
-  ✔ Completed step: output_batch_summary
-
-Execution Summary: Parallel DAG Fan-Out & Aggregation (run_ac2f4d07eeab)        
-┏━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━━━┳━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━━━━━━━━━┓
-┃ Step ID         ┃ Action    ┃  Status   ┃ Attempt ┃ Duration ┃ Error / Notes ┃
-┡━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━━━╇━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━━━━━━━━━┩
-│ init_pipeline   │ transform │ ● SUCCESS │    1    │    4.1ms │               │
-│ worker_shard_b… │ shell     │ ● SUCCESS │    1    │  204.6ms │               │
-│ worker_shard_a… │ shell     │ ● SUCCESS │    1    │  204.1ms │               │
-│ worker_shard_g… │ shell     │ ● SUCCESS │    1    │  204.0ms │               │
-│ aggregate_shar… │ transform │ ● SUCCESS │    1    │    4.7ms │               │
-│ output_batch_s… │ file      │ ● SUCCESS │    1    │    2.2ms │               │
-└─────────────────┴───────────┴───────────┴─────────┴──────────┴───────────────┘
-
-╭─ Run Result ─────────────────────────────────────────────────────────────────╮
-│ Status: ● SUCCESS  │  Total Duration: 223.80ms  │  Trigger: cli              │
-╰──────────────────────────────────────────────────────────────────────────────╯
-```
+1. **Topological Sorting**: Before execution begins, `WorkflowGraph` runs Kahn's algorithm to verify the DAG is acyclic and compute dependency chains.
+2. **Parallel Scheduling**: Tasks with zero unfinished prerequisites are scheduled as concurrent `asyncio.Task` instances bounded by a configurable `asyncio.Semaphore`.
+3. **Expression Interpolation**: The context maintains step outputs dynamically. When Step B runs, it can reference `{{ steps.step_a.output.some_field }}` with full type preservation.
+4. **State Persistence**: The SQLite storage layer records initial run creation, step transitions (`PENDING` ➔ `RUNNING` ➔ `SUCCESS`/`FAILED`/`SKIPPED`), execution duration, and errors.
 
 ---
 
-## 📝 Defining Workflows (YAML Specification)
+## 🧪 Testing Suite
 
-Workflows are clean, declarative YAML documents:
-
-```yaml
-id: github_release_tracker
-name: GitHub Release Tracker & Alert
-version: "1.0"
-description: Fetches latest GitHub releases and archives release notes
-
-env:
-  TARGET_REPO: "pallets/flask"
-
-triggers:
-  - type: cron
-    config:
-      expression: "0 */6 * * *"  # Run every 6 hours
-
-steps:
-  - id: fetch_latest_release
-    name: Fetch Latest Release
-    action: http
-    retry:
-      max_attempts: 3
-      initial_delay: 2.0
-      backoff_multiplier: 2.0
-    with:
-      url: "https://api.github.com/repos/{{ env.TARGET_REPO }}/releases/latest"
-      expected_status: [200]
-
-  - id: format_release_notes
-    name: Extract Version & Notes
-    action: transform
-    depends_on: [fetch_latest_release]
-    with:
-      value:
-        tag: "{{ steps.fetch_latest_release.output.json.tag_name }}"
-        author: "{{ steps.fetch_latest_release.output.json.author.login }}"
-        notes: "{{ steps.fetch_latest_release.output.json.body }}"
-
-  - id: save_release_file
-    name: Save Release Markdown
-    action: file
-    depends_on: [format_release_notes]
-    with:
-      operation: write
-      path: "./output/releases/{{ steps.format_release_notes.output.tag }}.md"
-      content: |
-        # Flask Release: {{ steps.format_release_notes.output.tag }}
-        Released by @{{ steps.format_release_notes.output.author }}
-        
-        {{ steps.format_release_notes.output.notes }}
-```
-
----
-
-## 🌐 Web Studio & API
-
-Start the self-hosted Web Dashboard, REST API, and Webhook Receiver:
-
-```bash
-flowforge serve --workflows-dir ./examples --port 8000
-```
-
-- **Interactive Studio UI**: Navigate to `http://localhost:8000` to view real-time execution telemetry, inspect step outputs, and trigger workflows on-demand.
-- **REST Endpoints**:
-  - `GET /api/v1/health` - System health and registered workflow count.
-  - `GET /api/v1/workflows` - List all registered workflows.
-  - `POST /api/v1/workflows/{id}/run` - Manually trigger execution with payload.
-  - `GET /api/v1/runs` - Query historical execution logs.
-  - `POST /api/v1/webhooks/{id}` - Ingest authenticated incoming webhooks.
-
----
-
-## 🛠 Ready-to-Run Examples
-
-The repository contains 6 production-ready automation workflows in [`examples/`](examples/):
-
-1. **`01_github_release_monitor.yaml`**: Polls the GitHub API, parses release tags, and generates local markdown documentation.
-2. **`02_system_health_watchdog.yaml`**: Diagnoses disk space, RAM, and uptime; records continuous telemetry.
-3. **`03_api_data_etl.yaml`**: Extracts data from REST APIs, normalizes payloads, and loads records into SQLite via SQL queries.
-4. **`04_ai_incident_summarizer.yaml`**: Synthesizes root-cause analysis and automated remediation plans for server errors.
-5. **`05_parallel_dag_fanout.yaml`**: Demonstrates barrier synchronization where 3 parallel workers run concurrently before a join step.
-6. **`06_webhook_pipeline.yaml`**: Ingests authenticated webhooks (with token validation) and dispatches formatted alerts.
-
----
-
-## 💻 CLI Commands
-
-```bash
-# Validate workflow DAG syntax and detect circular dependencies
-flowforge validate examples/01_github_release_monitor.yaml
-
-# Render terminal dependency tree
-flowforge tree examples/05_parallel_dag_fanout.yaml
-
-# Execute a workflow locally
-flowforge run examples/03_api_data_etl.yaml
-
-# List historical execution runs from SQLite
-flowforge runs list
-
-# Inspect detailed step logs and outputs of a specific run
-flowforge runs get <run_id>
-
-# Scaffold a new automation project
-flowforge init my_project
-```
-
----
-
-## 🐳 Docker Deployment
-
-Run the complete FlowForge container with Docker Compose:
-
-```bash
-docker compose up -d
-```
-
-The Web Dashboard and Webhook listener will be live on `http://localhost:8000`.
-
----
-
-## 🧪 Testing
-
-FlowForge maintains a comprehensive test suite covering models, expressions, DAG cycle detection, storage engines, actions, runner retries, REST endpoints, and CLI commands.
+FlowForge maintains 100% test pass fidelity across models, expressions, DAG cycle detection, storage, runner retries, REST endpoints, and CLI commands.
 
 ```bash
 # Run pytest with async support
 pytest -v
 ```
 
+```
+============================== test session starts ==============================
+collected 48 items
+
+tests/test_actions.py ......                                             [ 12%]
+tests/test_cli.py ......                                                 [ 25%]
+tests/test_expression.py .....                                           [ 35%]
+tests/test_graph.py .....                                                [ 45%]
+tests/test_models.py ......                                              [ 58%]
+tests/test_parser.py ....                                                [ 66%]
+tests/test_runner.py ......                                              [ 79%]
+tests/test_server.py ......                                              [ 91%]
+tests/test_storage.py ....                                               [100%]
+
+======================== 48 passed, 0 warnings in 0.67s ========================
+```
+
+---
+
+## 🤝 Contributing
+
+Contributions make open source awesome! If you'd like to add an action, improve performance, or enhance documentation:
+
+1. Fork the Project (`https://github.com/eyeblech/flowforge/fork`)
+2. Create your Feature Branch (`git checkout -b feat/amazing-feature`)
+3. Commit your Changes (`git commit -m 'feat: add amazing feature'`)
+4. Push to the Branch (`git push origin feat/amazing-feature`)
+5. Open a Pull Request
+
+---
+
+## 👤 Author
+
+Developed and maintained by **[@eyeblech](https://github.com/eyeblech)**.
+
+If you find FlowForge useful, please consider giving it a ⭐️ on [GitHub](https://github.com/eyeblech/flowforge)!
+
 ---
 
 ## 📄 License
 
-FlowForge is open-source software licensed under the [MIT License](LICENSE).
+Distributed under the MIT License. See [`LICENSE`](LICENSE) for more information.
