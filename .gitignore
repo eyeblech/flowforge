@@ -39,6 +39,8 @@ htmlcov/
 *.sqlite3
 *.wal
 *.shm
+*-wal
+*-shm
 .flowforge/
 output/
 

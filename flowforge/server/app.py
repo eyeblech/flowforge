@@ -1,16 +1,17 @@
 """FastAPI application providing REST endpoints, webhook ingestion, and web dashboard."""
 
-import json
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from fastapi import FastAPI, HTTPException, Header, Query, Request, status
+from fastapi import FastAPI, HTTPException, Header, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
+from flowforge.core.graph import WorkflowGraph
 from flowforge.core.models import WorkflowDefinition, WorkflowRun
-from flowforge.core.parser import load_workflow_file
+from flowforge.core.parser import load_workflow_file, parse_workflow_str
 from flowforge.engine.runner import WorkflowEngine
+from flowforge.server.dashboard import get_dashboard_html
 from flowforge.storage.base import BaseStorage
 from flowforge.storage.sqlite import SQLiteStorage
 from flowforge.triggers.cron import CronScheduler
@@ -25,6 +26,78 @@ class RunTriggerRequest(BaseModel):
     context: Dict[str, Any] = Field(default_factory=dict)
 
 
+class ValidateWorkflowRequest(BaseModel):
+    """Payload for syntax and DAG cycle validation."""
+    yaml_content: str
+
+
+class RunCustomWorkflowRequest(BaseModel):
+    """Payload for running a custom or edited workflow directly from the studio."""
+    yaml_content: str
+    payload: Dict[str, Any] = Field(default_factory=dict)
+    context: Dict[str, Any] = Field(default_factory=dict)
+
+
+def generate_mermaid_graph(wf: WorkflowDefinition, run: Optional[WorkflowRun] = None) -> str:
+    """Generate Mermaid flowchart TD definition for a workflow, optionally styled with run statuses."""
+    lines = [
+        "graph TD",
+        "  %% FlowForge Directed Acyclic Graph",
+        "  classDef default fill:#1e293b,stroke:#475569,stroke-width:1.5px,color:#f8fafc;",
+        "  classDef statusSuccess fill:#064e3b,stroke:#10b981,stroke-width:2px,color:#ecfdf5;",
+        "  classDef statusFailed fill:#4c0519,stroke:#f43f5e,stroke-width:2px,color:#fff1f2;",
+        "  classDef statusRunning fill:#0c4a6e,stroke:#38bdf8,stroke-width:2px,color:#f0f9ff;",
+        "  classDef statusSkipped fill:#1e293b,stroke:#64748b,stroke-width:1px,stroke-dasharray: 4 4,color:#94a3b8;",
+    ]
+
+    action_icons = {
+        "shell": "💻",
+        "http": "🌐",
+        "transform": "⚡",
+        "file": "📄",
+        "llm": "🤖",
+        "notify": "🔔",
+        "sql": "🗄️",
+        "delay": "⏱️",
+    }
+
+    step_keys: Dict[str, str] = {}
+    for step in wf.steps:
+        safe_key = "node_" + "".join(c if c.isalnum() or c == "_" else "_" for c in step.id)
+        step_keys[step.id] = safe_key
+        icon = action_icons.get(step.action, "⚙️")
+        name = (step.name or step.id).replace('"', "'")
+        lines.append(f'  {safe_key}["{icon} {name}<br/><sub style=\'opacity:0.7\'>{step.action} | {step.id}</sub>"]')
+
+    for step in wf.steps:
+        target_key = step_keys[step.id]
+        for dep in step.depends_on:
+            dep_key = step_keys.get(dep, "node_" + dep)
+            lines.append(f"  {dep_key} --> {target_key}")
+
+    if run and run.step_runs:
+        for step_id, st in run.step_runs.items():
+            k = step_keys.get(step_id)
+            if not k:
+                continue
+            status_val = st.status.value if hasattr(st.status, "value") else str(st.status)
+            if status_val == "success":
+                lines.append(f"  class {k} statusSuccess;")
+            elif status_val == "failed":
+                lines.append(f"  class {k} statusFailed;")
+            elif status_val == "running":
+                lines.append(f"  class {k} statusRunning;")
+            elif status_val == "skipped":
+                lines.append(f"  class {k} statusSkipped;")
+
+    return "\n".join(lines)
+
+
+def _get_dashboard_html() -> str:
+    """Return dashboard HTML (delegates to get_dashboard_html)."""
+    return get_dashboard_html()
+
+
 def create_app(
     storage: Optional[BaseStorage] = None,
     workflows_dir: Optional[str] = None,
@@ -35,10 +108,12 @@ def create_app(
     cron_scheduler = CronScheduler(engine=engine)
     file_watcher = FileWatcherTrigger(engine=engine)
 
+    effective_dir = workflows_dir or ("examples" if Path("examples").is_dir() else None)
+
     # Load workflows from directory if provided
     workflow_registry: Dict[str, WorkflowDefinition] = {}
-    if workflows_dir and Path(workflows_dir).is_dir():
-        for p in Path(workflows_dir).glob("*.yaml"):
+    if effective_dir and Path(effective_dir).is_dir():
+        for p in Path(effective_dir).glob("*.yaml"):
             try:
                 wf = load_workflow_file(p)
                 workflow_registry[wf.id] = wf
@@ -47,7 +122,7 @@ def create_app(
                 file_watcher.register_workflow(wf)
                 logger.info("Loaded workflow '%s' from %s", wf.id, p)
             except Exception as e:
-                logger.error("Failed loading workflow %s: %e", p, e)
+                logger.error("Failed loading workflow %s: %s", p, e)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -71,6 +146,7 @@ def create_app(
     app.state.storage = db_storage
     app.state.engine = engine
     app.state.workflows = workflow_registry
+    app.state.workflows_dir = effective_dir
 
     # ------------------- REST API Endpoints -------------------
 
@@ -81,6 +157,28 @@ def create_app(
             "version": "0.1.0",
             "workflows_loaded": len(app.state.workflows),
         }
+
+    @app.get("/api/v1/templates")
+    async def list_templates() -> List[Dict[str, Any]]:
+        """Return sample workflow templates loaded from the workflows directory."""
+        templates = []
+        target_dir = app.state.workflows_dir
+        if target_dir and Path(target_dir).is_dir():
+            for p in sorted(Path(target_dir).glob("*.yaml")):
+                try:
+                    content = p.read_text(encoding="utf-8")
+                    wf = load_workflow_file(p)
+                    templates.append({
+                        "id": wf.id,
+                        "name": wf.name,
+                        "filename": p.name,
+                        "description": wf.description or "",
+                        "yaml": content,
+                        "step_count": len(wf.steps),
+                    })
+                except Exception:
+                    pass
+        return templates
 
     @app.get("/api/v1/workflows")
     async def list_workflows() -> List[Dict[str, Any]]:
@@ -98,6 +196,76 @@ def create_app(
         if not wf:
             raise HTTPException(status_code=404, detail="Workflow not found")
         return wf.model_dump()
+
+    @app.get("/api/v1/workflows/{workflow_id}/dag")
+    async def get_workflow_dag(
+        workflow_id: str,
+        run_id: Optional[str] = Query(None),
+    ) -> Dict[str, Any]:
+        """Return Mermaid DAG definition and graph topology analysis for workflow."""
+        wf = app.state.workflows.get(workflow_id) or app.state.storage.get_workflow(workflow_id)
+        if not wf:
+            raise HTTPException(status_code=404, detail="Workflow not found")
+
+        run = None
+        if run_id:
+            run = app.state.storage.get_run(run_id)
+
+        mermaid_code = generate_mermaid_graph(wf, run=run)
+        graph = WorkflowGraph(wf)
+        return {
+            "workflow_id": wf.id,
+            "name": wf.name,
+            "mermaid": mermaid_code,
+            "execution_order": graph.topological_order(),
+            "root_steps": graph.get_root_steps(),
+            "step_count": len(wf.steps),
+        }
+
+    @app.post("/api/v1/workflows/validate")
+    async def validate_workflow_endpoint(req: ValidateWorkflowRequest) -> Dict[str, Any]:
+        """Validate workflow YAML syntax, Pydantic schema, and DAG cycle freedom."""
+        try:
+            wf = parse_workflow_str(req.yaml_content)
+            graph = WorkflowGraph(wf)
+            order = graph.topological_order()
+            roots = graph.get_root_steps()
+            mermaid_code = generate_mermaid_graph(wf)
+            return {
+                "valid": True,
+                "id": wf.id,
+                "name": wf.name,
+                "description": wf.description or "",
+                "step_count": len(wf.steps),
+                "execution_order": order,
+                "root_steps": roots,
+                "mermaid": mermaid_code,
+            }
+        except Exception as e:
+            return {
+                "valid": False,
+                "error": str(e),
+            }
+
+    @app.post("/api/v1/workflows/run-custom")
+    async def run_custom_workflow_endpoint(req: RunCustomWorkflowRequest) -> Dict[str, Any]:
+        """Parse, register, and execute custom YAML workflow from the Studio."""
+        try:
+            wf = parse_workflow_str(req.yaml_content)
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Invalid workflow syntax: {e}")
+
+        # Register workflow so runs can be tracked and inspected
+        app.state.storage.save_workflow(wf)
+        app.state.workflows[wf.id] = wf
+
+        run = await app.state.engine.execute(
+            workflow=wf,
+            trigger_type="studio_editor",
+            trigger_payload=req.payload,
+            initial_context=req.context,
+        )
+        return run.model_dump()
 
     @app.post("/api/v1/workflows/{workflow_id}/run")
     async def trigger_workflow(
@@ -205,331 +373,6 @@ def create_app(
 
     @app.get("/", response_class=HTMLResponse)
     async def dashboard() -> str:
-        return _get_dashboard_html()
+        return get_dashboard_html()
 
     return app
-
-
-def _get_dashboard_html() -> str:
-    """Return modern, self-contained HTML/CSS/JS dashboard."""
-    return """<!DOCTYPE html>
-<html lang="en" class="dark">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>FlowForge Orchestration Studio</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script>
-    tailwind.config = {
-      darkMode: 'class',
-      theme: {
-        extend: {
-          colors: {
-            brand: { 50: '#f0f9ff', 500: '#0284c7', 600: '#0369a1', 900: '#0c4a6e' },
-            darkbg: '#0f172a',
-            surface: '#1e293b',
-            border: '#334155',
-          }
-        }
-      }
-    }
-  </script>
-  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-  <style>
-    body { background-color: #0b0f19; font-family: ui-sans-serif, system-ui, -apple-system, sans-serif; }
-    pre { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
-  </style>
-</head>
-<body class="text-slate-200 min-h-screen flex flex-col">
-
-  <!-- Header Navbar -->
-  <header class="bg-slate-900 border-b border-slate-800 px-6 py-4 flex items-center justify-between sticky top-0 z-50 shadow-md">
-    <div class="flex items-center space-x-3">
-      <div class="bg-gradient-to-tr from-sky-500 to-indigo-600 w-9 h-9 rounded-lg flex items-center justify-center shadow-lg shadow-sky-500/20">
-        <i class="fa-solid fa-bolt text-white text-lg"></i>
-      </div>
-      <div>
-        <h1 class="text-lg font-bold text-white tracking-wide">FlowForge</h1>
-        <p class="text-xs text-slate-400">Workflow Automation & Orchestration Engine</p>
-      </div>
-    </div>
-    <div class="flex items-center space-x-4">
-      <span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-950/80 text-emerald-400 border border-emerald-800">
-        <span class="w-2 h-2 mr-1.5 bg-emerald-500 rounded-full animate-pulse"></span> Engine Active
-      </span>
-      <button onclick="refreshData()" class="px-3 py-1.5 text-xs bg-slate-800 hover:bg-slate-700 text-slate-300 font-medium rounded-md border border-slate-700 transition flex items-center space-x-1.5">
-        <i class="fa-solid fa-rotate-right"></i> <span>Refresh</span>
-      </button>
-    </div>
-  </header>
-
-  <!-- Main Container -->
-  <main class="flex-1 max-w-7xl w-full mx-auto p-6 space-y-6">
-
-    <!-- Metrics Cards -->
-    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-      <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-5 shadow-sm">
-        <div class="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider">
-          <span>Total Workflows</span>
-          <i class="fa-solid fa-diagram-project text-sky-400 text-base"></i>
-        </div>
-        <div class="text-2xl font-bold text-white mt-2" id="metric-workflows">0</div>
-        <div class="text-xs text-slate-400 mt-1">Loaded in engine</div>
-      </div>
-      <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-5 shadow-sm">
-        <div class="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider">
-          <span>Execution Runs</span>
-          <i class="fa-solid fa-play text-indigo-400 text-base"></i>
-        </div>
-        <div class="text-2xl font-bold text-white mt-2" id="metric-runs">0</div>
-        <div class="text-xs text-slate-400 mt-1">Lifetime executions</div>
-      </div>
-      <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-5 shadow-sm">
-        <div class="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider">
-          <span>Success Rate</span>
-          <i class="fa-solid fa-circle-check text-emerald-400 text-base"></i>
-        </div>
-        <div class="text-2xl font-bold text-emerald-400 mt-2" id="metric-success">100%</div>
-        <div class="text-xs text-slate-400 mt-1">Successful completions</div>
-      </div>
-      <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-5 shadow-sm">
-        <div class="flex items-center justify-between text-slate-400 text-xs font-semibold uppercase tracking-wider">
-          <span>Avg Duration</span>
-          <i class="fa-solid fa-stopwatch text-amber-400 text-base"></i>
-        </div>
-        <div class="text-2xl font-bold text-amber-300 mt-2" id="metric-duration">0 ms</div>
-        <div class="text-xs text-slate-400 mt-1">Per workflow run</div>
-      </div>
-    </div>
-
-    <!-- Two Column Layout: Workflows and Recent Executions -->
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
-
-      <!-- Left: Registered Workflows -->
-      <div class="bg-slate-900/90 border border-slate-800 rounded-xl p-5 shadow-sm flex flex-col space-y-4">
-        <div class="flex items-center justify-between pb-3 border-b border-slate-800">
-          <h2 class="text-sm font-bold text-white uppercase tracking-wider flex items-center space-x-2">
-            <i class="fa-solid fa-network-wired text-sky-400"></i>
-            <span>Registered Workflows</span>
-          </h2>
-          <span class="text-xs text-slate-400" id="workflow-badge">0</span>
-        </div>
-        <div id="workflows-list" class="space-y-3 overflow-y-auto max-h-[500px] pr-1">
-          <p class="text-xs text-slate-400 italic text-center py-6">Loading workflows...</p>
-        </div>
-      </div>
-
-      <!-- Right: Recent Execution Runs -->
-      <div class="lg:col-span-2 bg-slate-900/90 border border-slate-800 rounded-xl p-5 shadow-sm flex flex-col space-y-4">
-        <div class="flex items-center justify-between pb-3 border-b border-slate-800">
-          <h2 class="text-sm font-bold text-white uppercase tracking-wider flex items-center space-x-2">
-            <i class="fa-solid fa-list-check text-indigo-400"></i>
-            <span>Recent Executions</span>
-          </h2>
-          <span class="text-xs text-slate-400" id="runs-badge">Latest runs</span>
-        </div>
-        <div class="overflow-x-auto">
-          <table class="w-full text-left text-xs">
-            <thead class="text-slate-400 uppercase tracking-wider bg-slate-800/40 border-b border-slate-800">
-              <tr>
-                <th class="py-2.5 px-3">Run ID</th>
-                <th class="py-2.5 px-3">Workflow</th>
-                <th class="py-2.5 px-3">Status</th>
-                <th class="py-2.5 px-3">Trigger</th>
-                <th class="py-2.5 px-3">Duration</th>
-                <th class="py-2.5 px-3">Action</th>
-              </tr>
-            </thead>
-            <tbody id="runs-table-body" class="divide-y divide-slate-800/60">
-              <tr>
-                <td colspan="6" class="text-center py-8 text-slate-400 italic">No execution runs recorded yet.</td>
-              </tr>
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-    </div>
-
-    <!-- Run Detail Modal / Inspector -->
-    <div id="detail-modal" class="fixed inset-0 bg-black/80 hidden items-center justify-center p-4 z-50 backdrop-blur-sm">
-      <div class="bg-slate-900 border border-slate-700 w-full max-w-4xl rounded-2xl p-6 shadow-2xl flex flex-col max-h-[90vh]">
-        <div class="flex items-center justify-between pb-4 border-b border-slate-800">
-          <div>
-            <h3 class="text-base font-bold text-white flex items-center space-x-2">
-              <span id="modal-run-id" class="text-sky-400">Run Details</span>
-              <span id="modal-status-badge"></span>
-            </h3>
-            <p id="modal-workflow-info" class="text-xs text-slate-400 mt-1"></p>
-          </div>
-          <button onclick="closeModal()" class="text-slate-400 hover:text-white p-2 rounded-lg bg-slate-800 hover:bg-slate-700 transition">
-            <i class="fa-solid fa-xmark text-base"></i>
-          </button>
-        </div>
-
-        <div class="flex-1 overflow-y-auto py-4 space-y-4 pr-1">
-          <h4 class="text-xs font-semibold uppercase tracking-wider text-slate-400">Step Execution Tree</h4>
-          <div id="modal-steps-container" class="space-y-3"></div>
-        </div>
-      </div>
-    </div>
-
-  </main>
-
-  <footer class="bg-slate-900 border-t border-slate-800 py-4 px-6 text-center text-xs text-slate-400">
-    FlowForge Engine v0.1.0 • Built with Python, AsyncIO & FastAPI
-  </footer>
-
-  <script>
-    async function fetchData(url) {
-      const res = await fetch(url);
-      return res.json();
-    }
-
-    function statusBadge(status) {
-      if (status === 'success') {
-        return '<span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-emerald-950 text-emerald-400 border border-emerald-800"><i class="fa-solid fa-check mr-1 text-[9px]"></i> Success</span>';
-      } else if (status === 'failed') {
-        return '<span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-rose-950 text-rose-400 border border-rose-800"><i class="fa-solid fa-xmark mr-1 text-[9px]"></i> Failed</span>';
-      } else if (status === 'running') {
-        return '<span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-sky-950 text-sky-400 border border-sky-800"><i class="fa-solid fa-spinner fa-spin mr-1 text-[9px]"></i> Running</span>';
-      } else if (status === 'skipped') {
-        return '<span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-slate-800 text-slate-400 border border-slate-700">Skipped</span>';
-      }
-      return `<span class="inline-flex items-center px-2 py-0.5 rounded text-[11px] font-medium bg-amber-950 text-amber-400 border border-amber-800">${status}</span>`;
-    }
-
-    async function triggerWorkflow(wfId) {
-      try {
-        const btn = document.getElementById(`btn-run-${wfId}`);
-        if (btn) btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Running...';
-        const res = await fetch(`/api/v1/workflows/${wfId}/run`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ payload: { source: 'dashboard_ui' } })
-        });
-        await refreshData();
-      } catch (err) {
-        alert('Failed triggering workflow: ' + err);
-      }
-    }
-
-    async function inspectRun(runId) {
-      const run = await fetchData(`/api/v1/runs/${runId}`);
-      document.getElementById('modal-run-id').innerText = run.run_id;
-      document.getElementById('modal-status-badge').innerHTML = statusBadge(run.status);
-      document.getElementById('modal-workflow-info').innerText = 
-        `Workflow: ${run.workflow_id} | Trigger: ${run.trigger_type} | Duration: ${run.duration_ms || 0}ms`;
-
-      const stepsContainer = document.getElementById('modal-steps-container');
-      stepsContainer.innerHTML = '';
-
-      const steps = Object.values(run.step_runs || {});
-      if (steps.length === 0) {
-        stepsContainer.innerHTML = '<p class="text-xs text-slate-500 italic">No steps recorded in this run.</p>';
-      } else {
-        steps.forEach(st => {
-          const div = document.createElement('div');
-          div.className = 'bg-slate-800/80 border border-slate-700 rounded-lg p-3 space-y-2';
-          div.innerHTML = `
-            <div class="flex items-center justify-between">
-              <div class="flex items-center space-x-2">
-                <span class="font-bold text-white text-xs">${st.step_id}</span>
-                ${statusBadge(st.status)}
-              </div>
-              <span class="text-slate-400 text-[11px]">Attempt: ${st.attempt} • ${st.duration_ms ? st.duration_ms.toFixed(1) + 'ms' : '-'}</span>
-            </div>
-            ${st.error ? `<div class="bg-rose-950/60 border border-rose-800/80 rounded p-2 text-rose-300 text-xs font-mono">${st.error}</div>` : ''}
-            ${st.output_data ? `<details class="text-[11px]"><summary class="text-slate-400 cursor-pointer hover:text-slate-300 font-medium">Output JSON</summary><pre class="bg-slate-900 rounded p-2 mt-1 text-slate-300 overflow-x-auto max-h-40 font-mono">${JSON.stringify(st.output_data, null, 2)}</pre></details>` : ''}
-            ${st.logs && st.logs.length ? `<details class="text-[11px]"><summary class="text-slate-400 cursor-pointer hover:text-slate-300 font-medium">Logs (${st.logs.length})</summary><ul class="list-disc list-inside bg-slate-900/60 rounded p-2 mt-1 text-slate-400 font-mono text-[10px] space-y-0.5">${st.logs.map(l => `<li>${l}</li>`).join('')}</ul></details>` : ''}
-          `;
-          stepsContainer.appendChild(div);
-        });
-      }
-
-      const modal = document.getElementById('detail-modal');
-      modal.classList.remove('hidden');
-      modal.classList.add('flex');
-    }
-
-    function closeModal() {
-      const modal = document.getElementById('detail-modal');
-      modal.classList.add('hidden');
-      modal.classList.remove('flex');
-    }
-
-    async function refreshData() {
-      try {
-        const [workflows, runs] = await Promise.all([
-          fetchData('/api/v1/workflows'),
-          fetchData('/api/v1/runs?limit=30')
-        ]);
-
-        document.getElementById('metric-workflows').innerText = workflows.length;
-        document.getElementById('metric-runs').innerText = runs.length;
-        document.getElementById('workflow-badge').innerText = `${workflows.length} workflows`;
-
-        let successful = runs.filter(r => r.status === 'success').length;
-        let rate = runs.length > 0 ? ((successful / runs.length) * 100).toFixed(0) + '%' : '100%';
-        document.getElementById('metric-success').innerText = rate;
-
-        let totalMs = runs.reduce((acc, r) => acc + (r.duration_ms || 0), 0);
-        let avgMs = runs.length > 0 ? (totalMs / runs.length).toFixed(0) + ' ms' : '0 ms';
-        document.getElementById('metric-duration').innerText = avgMs;
-
-        // Render Workflows
-        const wfList = document.getElementById('workflows-list');
-        if (workflows.length === 0) {
-          wfList.innerHTML = '<p class="text-xs text-slate-500 italic text-center py-4">No workflows found.</p>';
-        } else {
-          wfList.innerHTML = workflows.map(wf => `
-            <div class="bg-slate-800/60 border border-slate-700/80 rounded-lg p-3 hover:border-slate-600 transition flex items-center justify-between">
-              <div>
-                <h4 class="text-xs font-bold text-white flex items-center space-x-1.5">
-                  <span>${wf.name}</span>
-                  <span class="text-[10px] text-slate-400 bg-slate-700/80 px-1.5 py-0.2 rounded font-mono">${wf.id}</span>
-                </h4>
-                <p class="text-[11px] text-slate-400 mt-0.5 line-clamp-1">${wf.description || 'No description'}</p>
-                <div class="text-[10px] text-slate-500 mt-1 flex space-x-2">
-                  <span><i class="fa-solid fa-list-ol mr-1"></i>${wf.steps.length} steps</span>
-                  <span><i class="fa-solid fa-bolt mr-1"></i>${wf.triggers ? wf.triggers.length : 0} triggers</span>
-                </div>
-              </div>
-              <button id="btn-run-${wf.id}" onclick="triggerWorkflow('${wf.id}')" class="px-2.5 py-1 text-xs bg-sky-600 hover:bg-sky-500 text-white rounded font-medium shadow-sm transition flex items-center space-x-1">
-                <i class="fa-solid fa-play text-[10px]"></i> <span>Run</span>
-              </button>
-            </div>
-          `).join('');
-        }
-
-        // Render Runs Table
-        const tbody = document.getElementById('runs-table-body');
-        if (runs.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="6" class="text-center py-8 text-slate-500 italic">No runs executed yet.</td></tr>';
-        } else {
-          tbody.innerHTML = runs.map(r => `
-            <tr class="hover:bg-slate-800/40 transition">
-              <td class="py-2.5 px-3 font-mono text-[11px] text-sky-400 font-semibold">${r.run_id}</td>
-              <td class="py-2.5 px-3 text-slate-300 font-medium">${r.workflow_id}</td>
-              <td class="py-2.5 px-3">${statusBadge(r.status)}</td>
-              <td class="py-2.5 px-3 font-mono text-[11px] text-slate-400">${r.trigger_type}</td>
-              <td class="py-2.5 px-3 font-mono text-[11px] text-slate-300">${r.duration_ms ? r.duration_ms.toFixed(1) + ' ms' : '-'}</td>
-              <td class="py-2.5 px-3">
-                <button onclick="inspectRun('${r.run_id}')" class="text-sky-400 hover:text-sky-300 font-medium text-xs hover:underline flex items-center space-x-1">
-                  <i class="fa-regular fa-eye"></i> <span>Inspect</span>
-                </button>
-              </td>
-            </tr>
-          `).join('');
-        }
-
-      } catch (e) {
-        console.error('Failed refreshing dashboard:', e);
-      }
-    }
-
-    refreshData();
-    setInterval(refreshData, 5000); // 5s auto-refresh
-  </script>
-</body>
-</html>"""

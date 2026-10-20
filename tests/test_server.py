@@ -93,3 +93,88 @@ def test_dashboard_html_endpoint(test_client: TestClient):
     assert res.status_code == 200
     assert "text/html" in res.headers["content-type"]
     assert "FlowForge" in res.text
+
+
+def test_templates_endpoint(test_client: TestClient):
+    res = test_client.get("/api/v1/templates")
+    assert res.status_code == 200
+    assert isinstance(res.json(), list)
+
+
+def test_validate_workflow_endpoint(test_client: TestClient):
+    valid_yaml = """
+id: sample_val
+name: Valid Workflow
+steps:
+  - id: step_a
+    action: transform
+    with:
+      value: 1
+  - id: step_b
+    action: transform
+    depends_on: [step_a]
+    with:
+      value: 2
+"""
+    res = test_client.post("/api/v1/workflows/validate", json={"yaml_content": valid_yaml})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["valid"] is True
+    assert data["id"] == "sample_val"
+    assert data["step_count"] == 2
+    assert "mermaid" in data
+    assert data["execution_order"] == ["step_a", "step_b"]
+
+    invalid_yaml = """
+id: sample_invalid
+name: Invalid Cyclic Workflow
+steps:
+  - id: step_x
+    action: transform
+    depends_on: [step_y]
+    with:
+      value: 1
+  - id: step_y
+    action: transform
+    depends_on: [step_x]
+    with:
+      value: 2
+"""
+    res = test_client.post("/api/v1/workflows/validate", json={"yaml_content": invalid_yaml})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["valid"] is False
+    assert "Cyclic" in data["error"] or "cycle" in data["error"].lower()
+
+
+def test_workflow_dag_endpoint(test_client: TestClient):
+    res = test_client.get("/api/v1/workflows/api_test_wf/dag")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["workflow_id"] == "api_test_wf"
+    assert "mermaid" in data
+    assert "graph TD" in data["mermaid"]
+    assert "ping" in data["mermaid"]
+
+
+def test_run_custom_workflow_endpoint(test_client: TestClient):
+    custom_yaml = """
+id: custom_studio_wf
+name: Custom Studio Pipeline
+steps:
+  - id: quick_step
+    action: transform
+    with:
+      value:
+        hello: "world"
+"""
+    res = test_client.post(
+        "/api/v1/workflows/run-custom",
+        json={"yaml_content": custom_yaml, "payload": {"foo": "bar"}},
+    )
+    assert res.status_code == 200
+    data = res.json()
+    assert data["workflow_id"] == "custom_studio_wf"
+    assert data["status"] == "success"
+    assert "quick_step" in data["step_runs"]
+
