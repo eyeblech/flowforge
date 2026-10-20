@@ -6,7 +6,7 @@
   ╚  ┴─┘└─┘└┴┘╚  └─┘┴└─└─┘└─┘
 ```
 
-# FlowForge ⚡
+# FlowForge 
 
 ### The Developer-First, Zero-Infrastructure Workflow Automation & Task Orchestration Engine for Python.
 
@@ -32,7 +32,7 @@
 
 ---
 
-## 🎯 What is FlowForge?
+## What is FlowForge?
 
 **FlowForge** is a modern, lightweight, async-native task orchestration and workflow automation engine. It allows developers to define multi-step Directed Acyclic Graph (DAG) pipelines in declarative YAML or Python, executing them with parallel task scheduling, automatic exponential-backoff retries, and microsecond SQLite state checkpointing.
 
@@ -52,7 +52,7 @@ FlowForge brings the power of enterprise DAG scheduling into a **single, zero-in
 
 ---
 
-## 💼 Real-World Use Cases
+## Real-World Use Cases
 
 FlowForge is engineered for developers, sysadmins, and data engineers who need reliable automation without distributed cluster complexity.
 
@@ -107,7 +107,7 @@ flowchart LR
 
 ---
 
-### 4. ⚡ High-Throughput Parallel Batch Processing (Fan-Out / Fan-In)
+### 4. High-Throughput Parallel Batch Processing (Fan-Out / Fan-In)
 > *Split large batch jobs across multiple concurrent shard workers, executing them in parallel and aggregating outputs at a barrier step.*
 
 ```mermaid
@@ -125,7 +125,7 @@ flowchart TD
 
 ---
 
-### 5. 🔔 Webhook Event Ingestion & Notification Router
+### 5. Webhook Event Ingestion & Notification Router
 > *Listen for incoming webhooks (GitHub pushes, Stripe payments, Datadog alerts), authenticate tokens, and route formatted alerts.*
 
 - **Example File**: [`examples/06_webhook_pipeline.yaml`](examples/06_webhook_pipeline.yaml)
@@ -133,7 +133,7 @@ flowchart TD
 
 ---
 
-## ⚡ Feature Comparison Matrix
+## Feature Comparison Matrix
 
 | Feature | **FlowForge** | **Apache Airflow** | **Temporal** | **Celery** |
 |---|---|---|---|---|
@@ -148,7 +148,7 @@ flowchart TD
 
 ---
 
-## 🚀 How to Run
+## How to Run
 
 You can run FlowForge in 4 flexible ways depending on your environment.
 
@@ -491,26 +491,3 @@ tests/test_storage.py ....                                               [100%]
 
 ---
 
-## 🤝 Contributing
-
-Contributions make open source awesome! If you'd like to add an action, improve performance, or enhance documentation:
-
-1. Fork the Project (`https://github.com/eyeblech/flowforge/fork`)
-2. Create your Feature Branch (`git checkout -b feat/amazing-feature`)
-3. Commit your Changes (`git commit -m 'feat: add amazing feature'`)
-4. Push to the Branch (`git push origin feat/amazing-feature`)
-5. Open a Pull Request
-
----
-
-## 👤 Author
-
-Developed and maintained by **[@eyeblech](https://github.com/eyeblech)**.
-
-If you find FlowForge useful, please consider giving it a ⭐️ on [GitHub](https://github.com/eyeblech/flowforge)!
-
----
-
-## 📄 License
-
-Distributed under the MIT License. See [`LICENSE`](LICENSE) for more information.
