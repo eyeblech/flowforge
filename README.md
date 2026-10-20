@@ -11,12 +11,9 @@
 ### The Developer-First, Zero-Infrastructure Workflow Automation & Task Orchestration Engine for Python.
 
 [![CI](https://github.com/eyeblech/flowforge/actions/workflows/ci.yml/badge.svg)](https://github.com/eyeblech/flowforge/actions)
-[![Python Version](https://img.shields.io/badge/python-3.10%20%7C%203.11%20%7C%203.12-3776AB.svg?logo=python&logoColor=white)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-10b981.svg)](LICENSE)
-[![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![Architecture: AsyncIO](https://img.shields.io/badge/engine-asyncio-8b5cf6.svg)](https://docs.python.org/3/library/asyncio.html)
 [![Storage: SQLite WAL](https://img.shields.io/badge/storage-SQLite%20WAL-003B57.svg?logo=sqlite&logoColor=white)](https://www.sqlite.org/wal.html)
-[![GitHub stars](https://img.shields.io/github/stars/eyeblech/flowforge?style=social)](https://github.com/eyeblech/flowforge/stargazers)
 
 <p align="center">
   <a href="#-what-is-flowforge">What is FlowForge?</a> •
