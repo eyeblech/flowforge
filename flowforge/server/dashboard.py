@@ -1,8 +1,22 @@
 """FlowForge Studio Dashboard HTML, CSS & JavaScript single-page application."""
 
-def get_dashboard_html() -> str:
+def get_dashboard_html(demo_mode: bool = False) -> str:
     """Return modern, self-contained HTML/CSS/JS dashboard for FlowForge."""
-    return """<!DOCTYPE html>
+    demo_badge = (
+        '<span class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold bg-amber-950/80 text-amber-300 border border-amber-800 shadow-sm" title="Public demo sandbox: custom shell commands restricted">'
+        '<i class="fa-solid fa-shield-halved mr-1.5 text-amber-400"></i> Demo Sandbox</span>'
+        if demo_mode
+        else ""
+    )
+    demo_notice = (
+        '<div class="mt-2 text-xs bg-amber-950/50 border border-amber-800/70 text-amber-300 px-3 py-1.5 rounded-xl flex items-center space-x-2 shadow-sm">'
+        '<i class="fa-solid fa-shield-halved text-amber-400 text-sm flex-shrink-0"></i>'
+        '<span><strong>Demo Sandbox Active:</strong> Pre-packaged workflows, transformations, HTTP requests, and DAG branches execute live! Custom <code class="bg-slate-800 px-1 py-0.5 rounded font-mono text-amber-200">shell</code> tasks are restricted for host container security.</span>'
+        '</div>'
+        if demo_mode
+        else ""
+    )
+    html = """<!DOCTYPE html>
 <html lang="en" class="dark">
 <head>
   <meta charset="UTF-8">
@@ -89,6 +103,7 @@ def get_dashboard_html() -> str:
 
     <!-- Right Controls -->
     <div class="flex items-center space-x-3">
+      <!-- DEMO_BADGE_PLACEHOLDER -->
       <span class="inline-flex items-center px-3 py-1 rounded-full text-xs font-medium bg-emerald-950/80 text-emerald-400 border border-emerald-800 shadow-sm">
         <span class="w-2 h-2 mr-2 bg-emerald-400 rounded-full animate-ping"></span> Async Engine Active
       </span>
@@ -274,6 +289,7 @@ def get_dashboard_html() -> str:
               <span>Interactive Workflow Studio & Runner</span>
             </h2>
             <p class="text-xs text-slate-400 mt-0.5">Write or customize declarative YAML pipelines, validate cycle-free DAGs, and execute instantly.</p>
+            <!-- DEMO_NOTICE_PLACEHOLDER -->
           </div>
 
           <div class="flex flex-wrap items-center gap-2">
@@ -902,3 +918,8 @@ def get_dashboard_html() -> str:
   </script>
 </body>
 </html>"""
+    return html.replace(
+        "<!-- DEMO_BADGE_PLACEHOLDER -->", demo_badge
+    ).replace(
+        "<!-- DEMO_NOTICE_PLACEHOLDER -->", demo_notice
+    )

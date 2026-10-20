@@ -2,6 +2,7 @@
 
 import pytest
 from fastapi.testclient import TestClient
+
 from flowforge.core.models import (
     StepDefinition,
     TriggerDefinition,
@@ -177,4 +178,56 @@ steps:
     assert data["workflow_id"] == "custom_studio_wf"
     assert data["status"] == "success"
     assert "quick_step" in data["step_runs"]
+
+
+def test_demo_mode_blocks_custom_shell():
+    storage = MemoryStorage()
+    app = create_app(storage=storage, demo_mode=True)
+    with TestClient(app) as client:
+        # Health check includes demo_mode
+        health_res = client.get("/api/v1/health")
+        assert health_res.status_code == 200
+        assert health_res.json()["demo_mode"] is True
+
+        # Custom workflow with shell step must be rejected
+        dangerous_yaml = """
+id: test_malicious_yaml
+name: Attempt Custom Shell
+steps:
+  - id: exec_shell
+    action: shell
+    with:
+      command: "echo test"
+"""
+        res = client.post(
+            "/api/v1/workflows/run-custom",
+            json={"yaml_content": dangerous_yaml},
+        )
+        assert res.status_code == 403
+        assert "disabled in public demo sandbox" in res.json()["detail"]
+
+        # Custom workflow with safe transform must succeed
+        safe_yaml = """
+id: test_safe_custom
+name: Safe Transform
+steps:
+  - id: safe_calc
+    action: transform
+    with:
+      value:
+        ok: true
+"""
+        res_safe = client.post(
+            "/api/v1/workflows/run-custom",
+            json={"yaml_content": safe_yaml},
+        )
+        assert res_safe.status_code == 200
+        assert res_safe.json()["status"] == "success"
+
+        # Dashboard shows demo badge
+        dash_res = client.get("/")
+        assert dash_res.status_code == 200
+        assert "Demo Sandbox" in dash_res.text
+
+
 

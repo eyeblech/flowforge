@@ -20,6 +20,8 @@ RUN pip install --no-cache-dir --upgrade pip && \
 RUN mkdir -p /app/data /app/output /app/workflows
 
 ENV PYTHONUNBUFFERED=1
+ENV HOST=0.0.0.0
+ENV PORT=8000
 EXPOSE 8000
 
-CMD ["flowforge", "serve", "--host", "0.0.0.0", "--port", "8000", "--workflows-dir", "/app/examples", "--db", "/app/data/flowforge.db"]
+CMD ["sh", "-c", "flowforge serve --host ${HOST:-0.0.0.0} --port ${PORT:-8000} --workflows-dir /app/examples --db /app/data/flowforge.db"]

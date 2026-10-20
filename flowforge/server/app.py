@@ -1,9 +1,12 @@
 """FastAPI application providing REST endpoints, webhook ingestion, and web dashboard."""
 
+import os
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any, Dict, List, Optional
-from fastapi import FastAPI, HTTPException, Header, Query, Request
+from typing import Any
+
+from fastapi import FastAPI, Header, HTTPException, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel, Field
 
@@ -22,8 +25,8 @@ from flowforge.utils.logger import logger
 
 class RunTriggerRequest(BaseModel):
     """Payload for manual workflow triggering via API."""
-    payload: Dict[str, Any] = Field(default_factory=dict)
-    context: Dict[str, Any] = Field(default_factory=dict)
+    payload: dict[str, Any] = Field(default_factory=dict)
+    context: dict[str, Any] = Field(default_factory=dict)
 
 
 class ValidateWorkflowRequest(BaseModel):
@@ -34,11 +37,11 @@ class ValidateWorkflowRequest(BaseModel):
 class RunCustomWorkflowRequest(BaseModel):
     """Payload for running a custom or edited workflow directly from the studio."""
     yaml_content: str
-    payload: Dict[str, Any] = Field(default_factory=dict)
-    context: Dict[str, Any] = Field(default_factory=dict)
+    payload: dict[str, Any] = Field(default_factory=dict)
+    context: dict[str, Any] = Field(default_factory=dict)
 
 
-def generate_mermaid_graph(wf: WorkflowDefinition, run: Optional[WorkflowRun] = None) -> str:
+def generate_mermaid_graph(wf: WorkflowDefinition, run: WorkflowRun | None = None) -> str:
     """Generate Mermaid flowchart TD definition for a workflow, optionally styled with run statuses."""
     lines = [
         "graph TD",
@@ -61,7 +64,7 @@ def generate_mermaid_graph(wf: WorkflowDefinition, run: Optional[WorkflowRun] = 
         "delay": "⏱️",
     }
 
-    step_keys: Dict[str, str] = {}
+    step_keys: dict[str, str] = {}
     for step in wf.steps:
         safe_key = "node_" + "".join(c if c.isalnum() or c == "_" else "_" for c in step.id)
         step_keys[step.id] = safe_key
@@ -93,14 +96,15 @@ def generate_mermaid_graph(wf: WorkflowDefinition, run: Optional[WorkflowRun] = 
     return "\n".join(lines)
 
 
-def _get_dashboard_html() -> str:
+def _get_dashboard_html(demo_mode: bool = False) -> str:
     """Return dashboard HTML (delegates to get_dashboard_html)."""
-    return get_dashboard_html()
+    return get_dashboard_html(demo_mode=demo_mode)
 
 
 def create_app(
-    storage: Optional[BaseStorage] = None,
-    workflows_dir: Optional[str] = None,
+    storage: BaseStorage | None = None,
+    workflows_dir: str | None = None,
+    demo_mode: bool | None = None,
 ) -> FastAPI:
     """Create and configure the FlowForge FastAPI application."""
     db_storage = storage or SQLiteStorage("flowforge.db")
@@ -109,9 +113,14 @@ def create_app(
     file_watcher = FileWatcherTrigger(engine=engine)
 
     effective_dir = workflows_dir or ("examples" if Path("examples").is_dir() else None)
+    is_demo = (
+        demo_mode
+        if demo_mode is not None
+        else (os.environ.get("FLOWFORGE_DEMO", "").lower() in ("1", "true", "yes"))
+    )
 
     # Load workflows from directory if provided
-    workflow_registry: Dict[str, WorkflowDefinition] = {}
+    workflow_registry: dict[str, WorkflowDefinition] = {}
     if effective_dir and Path(effective_dir).is_dir():
         for p in Path(effective_dir).glob("*.yaml"):
             try:
@@ -142,24 +151,34 @@ def create_app(
         lifespan=lifespan,
     )
 
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["*"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
     # Attach shared instances to app state
     app.state.storage = db_storage
     app.state.engine = engine
     app.state.workflows = workflow_registry
     app.state.workflows_dir = effective_dir
+    app.state.demo_mode = is_demo
 
     # ------------------- REST API Endpoints -------------------
 
     @app.get("/api/v1/health")
-    async def get_health() -> Dict[str, Any]:
+    async def get_health() -> dict[str, Any]:
         return {
             "status": "healthy",
             "version": "0.1.0",
             "workflows_loaded": len(app.state.workflows),
+            "demo_mode": app.state.demo_mode,
         }
 
     @app.get("/api/v1/templates")
-    async def list_templates() -> List[Dict[str, Any]]:
+    async def list_templates() -> list[dict[str, Any]]:
         """Return sample workflow templates loaded from the workflows directory."""
         templates = []
         target_dir = app.state.workflows_dir
@@ -181,7 +200,7 @@ def create_app(
         return templates
 
     @app.get("/api/v1/workflows")
-    async def list_workflows() -> List[Dict[str, Any]]:
+    async def list_workflows() -> list[dict[str, Any]]:
         wfs = app.state.storage.list_workflows()
         # Merge in-memory registry
         seen = {wf.id for wf in wfs}
@@ -191,7 +210,7 @@ def create_app(
         return [wf.model_dump() for wf in wfs]
 
     @app.get("/api/v1/workflows/{workflow_id}")
-    async def get_workflow(workflow_id: str) -> Dict[str, Any]:
+    async def get_workflow(workflow_id: str) -> dict[str, Any]:
         wf = app.state.workflows.get(workflow_id) or app.state.storage.get_workflow(workflow_id)
         if not wf:
             raise HTTPException(status_code=404, detail="Workflow not found")
@@ -200,8 +219,8 @@ def create_app(
     @app.get("/api/v1/workflows/{workflow_id}/dag")
     async def get_workflow_dag(
         workflow_id: str,
-        run_id: Optional[str] = Query(None),
-    ) -> Dict[str, Any]:
+        run_id: str | None = Query(None),
+    ) -> dict[str, Any]:
         """Return Mermaid DAG definition and graph topology analysis for workflow."""
         wf = app.state.workflows.get(workflow_id) or app.state.storage.get_workflow(workflow_id)
         if not wf:
@@ -223,7 +242,7 @@ def create_app(
         }
 
     @app.post("/api/v1/workflows/validate")
-    async def validate_workflow_endpoint(req: ValidateWorkflowRequest) -> Dict[str, Any]:
+    async def validate_workflow_endpoint(req: ValidateWorkflowRequest) -> dict[str, Any]:
         """Validate workflow YAML syntax, Pydantic schema, and DAG cycle freedom."""
         try:
             wf = parse_workflow_str(req.yaml_content)
@@ -248,12 +267,23 @@ def create_app(
             }
 
     @app.post("/api/v1/workflows/run-custom")
-    async def run_custom_workflow_endpoint(req: RunCustomWorkflowRequest) -> Dict[str, Any]:
+    async def run_custom_workflow_endpoint(req: RunCustomWorkflowRequest) -> dict[str, Any]:
         """Parse, register, and execute custom YAML workflow from the Studio."""
         try:
             wf = parse_workflow_str(req.yaml_content)
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Invalid workflow syntax: {e}")
+
+        if app.state.demo_mode:
+            shell_steps = [s.id for s in wf.steps if s.action == "shell"]
+            if shell_steps:
+                raise HTTPException(
+                    status_code=403,
+                    detail=(
+                        f"Custom shell execution is disabled in public demo sandbox (step: '{shell_steps[0]}'). "
+                        "Pre-packaged sample workflows, transforms, HTTP requests, delays, and DAG execution are fully enabled!"
+                    ),
+                )
 
         # Register workflow so runs can be tracked and inspected
         app.state.storage.save_workflow(wf)
@@ -270,7 +300,7 @@ def create_app(
     @app.post("/api/v1/workflows/{workflow_id}/run")
     async def trigger_workflow(
         workflow_id: str, request_data: RunTriggerRequest
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         wf = app.state.workflows.get(workflow_id) or app.state.storage.get_workflow(workflow_id)
         if not wf:
             raise HTTPException(status_code=404, detail="Workflow not found")
@@ -285,14 +315,14 @@ def create_app(
 
     @app.get("/api/v1/runs")
     async def list_runs(
-        workflow_id: Optional[str] = Query(None),
+        workflow_id: str | None = Query(None),
         limit: int = Query(50, ge=1, le=200),
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         runs = app.state.storage.list_runs(workflow_id=workflow_id, limit=limit)
         return [r.model_dump() for r in runs]
 
     @app.get("/api/v1/runs/{run_id}")
-    async def get_run(run_id: str) -> Dict[str, Any]:
+    async def get_run(run_id: str) -> dict[str, Any]:
         run = app.state.storage.get_run(run_id)
         if not run:
             raise HTTPException(status_code=404, detail="Run not found")
@@ -305,8 +335,8 @@ def create_app(
     async def receive_webhook(
         workflow_id: str,
         request: Request,
-        x_flowforge_token: Optional[str] = Header(None),
-        authorization: Optional[str] = Header(None),
+        x_flowforge_token: str | None = Header(None),
+        authorization: str | None = Header(None),
     ) -> JSONResponse:
         wf = app.state.workflows.get(workflow_id) or app.state.storage.get_workflow(workflow_id)
         if not wf:
@@ -373,6 +403,6 @@ def create_app(
 
     @app.get("/", response_class=HTMLResponse)
     async def dashboard() -> str:
-        return get_dashboard_html()
+        return get_dashboard_html(demo_mode=app.state.demo_mode)
 
     return app

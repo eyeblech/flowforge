@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: flowforge
+    runtime: docker
+    plan: free
+    region: oregon
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: FLOWFORGE_DEMO
+        value: "true"
+      - key: HOST
+        value: "0.0.0.0"

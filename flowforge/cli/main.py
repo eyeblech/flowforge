@@ -1,9 +1,8 @@
 """FlowForge CLI entry point and command implementations."""
 
 import asyncio
-import json
 from pathlib import Path
-from typing import List, Optional
+
 import typer
 from rich.panel import Panel
 from rich.table import Table
@@ -40,7 +39,7 @@ console = get_console()
 def run_command(
     workflow_path: str = typer.Argument(..., help="Path to workflow YAML or JSON file."),
     db_path: str = typer.Option("flowforge.db", "--db", help="Path to SQLite persistence database."),
-    params: Optional[List[str]] = typer.Option(
+    params: list[str] | None = typer.Option(
         None, "--param", "-p", help="Key=Value parameters passed to workflow trigger payload."
     ),
     verbose: bool = typer.Option(False, "--verbose", "-v", help="Enable verbose debug logging."),
@@ -166,18 +165,39 @@ def serve_command(
     host: str = typer.Option("127.0.0.1", "--host", "-h", help="Bind host address."),
     port: int = typer.Option(8000, "--port", "-p", help="Bind port."),
     db_path: str = typer.Option("flowforge.db", "--db", help="Path to SQLite persistence database."),
+    demo: bool = typer.Option(False, "--demo", help="Enable public demo sandbox mode (restricts custom shell execution)."),
 ) -> None:
     """Launch the FlowForge Web Dashboard, REST API, and Trigger Server."""
+    import os
+
     import uvicorn
+
     from flowforge.server.app import create_app
+
+    env_host = os.environ.get("HOST")
+    if env_host and host == "127.0.0.1":
+        host = env_host
+
+    env_port = os.environ.get("PORT")
+    if env_port and port == 8000:
+        try:
+            port = int(env_port)
+        except ValueError:
+            pass
+
+    demo_mode = demo or (os.environ.get("FLOWFORGE_DEMO", "").lower() in ("1", "true", "yes"))
+    if demo_mode:
+        os.environ["FLOWFORGE_DEMO"] = "true"
 
     render_banner(console)
     console.print(f"[bold green]Starting FlowForge Studio & Webhook Server on http://{host}:{port}[/bold green]")
+    if demo_mode:
+        console.print("[bold yellow]🛡️  Public Demo Mode Active: Custom shell execution restricted.[/bold yellow]")
     console.print(f"Workflows directory: [cyan]{workflows_dir}[/cyan]")
     console.print(f"Database: [cyan]{db_path}[/cyan]\n")
 
     storage = SQLiteStorage(db_path)
-    app_instance = create_app(storage=storage, workflows_dir=workflows_dir)
+    app_instance = create_app(storage=storage, workflows_dir=workflows_dir, demo_mode=demo_mode)
     uvicorn.run(app_instance, host=host, port=port, log_level="info")
 
 
@@ -230,14 +250,14 @@ steps:
     console.print(f"[bold green]✔ Initialized FlowForge project in [cyan]{target.resolve()}[/cyan][/bold green]")
     console.print("Sample workflow created: [bold]workflows/sample_pipeline.yaml[/bold]")
     console.print("\nRun it now with:")
-    console.print(f"  [cyan]flowforge run workflows/sample_pipeline.yaml[/cyan]")
+    console.print("  [cyan]flowforge run workflows/sample_pipeline.yaml[/cyan]")
 
 
 # Subcommands for `flowforge runs`
 @runs_app.command("list")
 def runs_list_command(
     db_path: str = typer.Option("flowforge.db", "--db", help="Path to SQLite persistence database."),
-    workflow: Optional[str] = typer.Option(None, "--workflow", "-w", help="Filter by workflow ID."),
+    workflow: str | None = typer.Option(None, "--workflow", "-w", help="Filter by workflow ID."),
     limit: int = typer.Option(20, "--limit", "-n", help="Number of records to display."),
 ) -> None:
     """List execution runs stored in the database."""
