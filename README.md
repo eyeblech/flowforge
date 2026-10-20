@@ -14,7 +14,6 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-10b981.svg)](LICENSE)
 [![Architecture: AsyncIO](https://img.shields.io/badge/engine-asyncio-8b5cf6.svg)](https://docs.python.org/3/library/asyncio.html)
 [![Storage: SQLite WAL](https://img.shields.io/badge/storage-SQLite%20WAL-003B57.svg?logo=sqlite&logoColor=white)](https://www.sqlite.org/wal.html)
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/eyeblech/flowforge)
 
 <p align="center">
   <a href="#-what-is-flowforge">What is FlowForge?</a> •
@@ -90,7 +89,7 @@ flowchart LR
 
 ---
 
-### 3. 🤖 AI-Powered Incident Triage & Diagnostics
+### 3. AI-Powered Incident Triage & Diagnostics
 > *Ingest production crash reports, use local LLMs (Ollama) or OpenAI to analyze tracebacks, extract root causes, and draft remediation tickets.*
 
 ```mermaid
@@ -266,21 +265,7 @@ Access the studio at `http://localhost:8000`.
 
 ---
 
-#### Option D: 1-Click Cloud Deployment (Render / Docker)
-
-Deploy a live FlowForge Studio instance to the cloud with automatic HTTPS:
-
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/eyeblech/flowforge)
-
-Or run on any container host (Render, Fly.io, Railway, Hugging Face Spaces):
-
-```bash
-docker run -d -p 8000:8000 -e FLOWFORGE_DEMO=true flowforge
-```
-
----
-
-#### Option E: Programmatic Python SDK
+#### Option D: Programmatic Python SDK
 
 Use FlowForge directly inside your Python applications:
 
@@ -311,7 +296,7 @@ asyncio.run(main())
 
 ---
 
-## 📖 Workflow Anatomy (YAML Specification)
+## Workflow Anatomy (YAML Specification)
 
 Every workflow is defined in clear, human-readable YAML:
 
@@ -475,7 +460,7 @@ FlowForge separates concerns into clean, decoupled layers:
 
 ---
 
-## 🧪 Testing Suite
+## Testing Suite
 
 FlowForge maintains 100% test pass fidelity across models, expressions, DAG cycle detection, storage, runner retries, REST endpoints, and CLI commands.
 
